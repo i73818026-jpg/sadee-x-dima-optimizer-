@@ -1,69 +1,60 @@
 name: Build SADEE-DIMA APKs
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show project files
+      - name: Check Flutter project
         run: |
+          echo "Current directory:"
           pwd
+          echo "Files:"
           ls -la
-          find . -maxdepth 2 -name pubspec.yaml -print
+          echo "pubspec.yaml:"
+          test -f pubspec.yaml
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.35.0'
           channel: stable
           cache: true
 
-      - name: Find Flutter project
-        run: |
-          PROJECT_DIR=$(dirname "$(find . -name pubspec.yaml -print -quit)")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
-          echo "Flutter project: $PROJECT_DIR"
-
       - name: Flutter Pub Get
-        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
 
       - name: Flutter Analyze
-        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter analyze --no-fatal-infos
 
       - name: Build User APK
-        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter build apk --release -t lib/main_user.dart
 
-      - name: Save User APK
+      - name: Rename User APK
         run: |
           mkdir -p release
-          cp "${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk" \
+          cp build/app/outputs/flutter-apk/app-release.apk \
              release/SADEE-DIMA-USER.apk
 
       - name: Build Admin APK
-        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter build apk --release -t lib/main_admin.dart
 
-      - name: Save Admin APK
+      - name: Rename Admin APK
         run: |
-          mkdir -p release
-          cp "${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk" \
+          cp build/app/outputs/flutter-apk/app-release.apk \
              release/SADEE-DIMA-ADMIN.apk
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: SADEE-DIMA-APKs
-          path: release/*.apk
+          path: release/
           if-no-files-found: error
