@@ -8,15 +8,18 @@ on:
 
 jobs:
   build:
-    name: Build User & Admin APKs
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Setup Flutter
+      - name: Show project files
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 2 -name pubspec.yaml -print
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -24,42 +27,40 @@ jobs:
           channel: stable
           cache: true
 
-      # 3. Get dependencies
+      - name: Find Flutter project
+        run: |
+          PROJECT_DIR=$(dirname "$(find . -name pubspec.yaml -print -quit)")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Flutter project: $PROJECT_DIR"
+
       - name: Flutter Pub Get
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
 
-      # 4. Analyze project
       - name: Flutter Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter analyze --no-fatal-infos
 
-      # 5. Build USER APK
       - name: Build User APK
-        run: |
-          flutter build apk \
-            --release \
-            -t lib/main_user.dart
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter build apk --release -t lib/main_user.dart
 
-      # 6. Rename USER APK
-      - name: Prepare User APK
+      - name: Save User APK
         run: |
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-release.apk \
+          cp "${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk" \
              release/SADEE-DIMA-USER.apk
 
-      # 7. Build ADMIN APK
       - name: Build Admin APK
-        run: |
-          flutter build apk \
-            --release \
-            -t lib/main_admin.dart
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter build apk --release -t lib/main_admin.dart
 
-      # 8. Rename ADMIN APK
-      - name: Prepare Admin APK
+      - name: Save Admin APK
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk \
+          mkdir -p release
+          cp "${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk" \
              release/SADEE-DIMA-ADMIN.apk
 
-      # 9. Upload both APKs
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
