@@ -11,50 +11,100 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout GitHub repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check Flutter project
+      # 2. Extract uploaded ZIP
+      - name: Extract Flutter project
         run: |
-          echo "Current directory:"
-          pwd
-          echo "Files:"
-          ls -la
-          echo "pubspec.yaml:"
-          test -f pubspec.yaml
+          set -e
 
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found!"
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p extracted
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | sort
+
+      # 3. Find Flutter project root
+      - name: Find Flutter project
+        run: |
+          set -e
+
+          PUBSPEC=$(find extracted -name pubspec.yaml -type f | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "ERROR: pubspec.yaml not found inside ZIP!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      # 4. Setup Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
+      # 5. Flutter dependencies
       - name: Flutter Pub Get
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
 
+      # 6. Analyze
       - name: Flutter Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter analyze --no-fatal-infos
 
+      # 7. Build USER APK
       - name: Build User APK
-        run: flutter build apk --release -t lib/main_user.dart
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build apk \
+            --release \
+            -t lib/main_user.dart
 
-      - name: Rename User APK
+      # 8. Save USER APK
+      - name: Save User APK
         run: |
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-release.apk \
+
+          cp "${PROJECT_DIR}/build/app/outputs/flutter-apk/app-release.apk" \
              release/SADEE-DIMA-USER.apk
 
+      # 9. Build ADMIN APK
       - name: Build Admin APK
-        run: flutter build apk --release -t lib/main_admin.dart
-
-      - name: Rename Admin APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk \
+          flutter build apk \
+            --release \
+            -t lib/main_admin.dart
+
+      # 10. Save ADMIN APK
+      - name: Save Admin APK
+        run: |
+          cp "${PROJECT_DIR}/build/app/outputs/flutter-apk/app-release.apk" \
              release/SADEE-DIMA-ADMIN.apk
 
+      # 11. Upload both APKs
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: SADEE-DIMA-APKs
-          path: release/
+          path: release/*.apk
           if-no-files-found: error
