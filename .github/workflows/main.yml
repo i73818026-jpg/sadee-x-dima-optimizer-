@@ -1,53 +1,479 @@
+name: Build SADEE-DIMA APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # 2. FIND + EXTRACT ZIP
+      # ============================================================
+      - name: Extract Flutter project from ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "======================================"
+          echo "REPOSITORY CONTENT"
+          echo "======================================"
+
+          find . -maxdepth 2 -type f | sort
+
+          # If Flutter project is already at root
+          if [ -f "pubspec.yaml" ]; then
+
+            echo ""
+            echo "Flutter project already exists in repository root."
+
+            PROJECT_DIR="."
+
+          else
+
+            echo ""
+            echo "Searching for Flutter ZIP..."
+
+            ZIP_FILE="$(find . -maxdepth 1 -type f -name '*.zip' -print | sort | tail -n 1 || true)"
+
+            if [ -z "$ZIP_FILE" ]; then
+              echo "ERROR: No ZIP file found in repository root."
+              exit 1
+            fi
+
+            echo ""
+            echo "Using ZIP:"
+            echo "$ZIP_FILE"
+
+            rm -rf extracted
+            mkdir -p extracted
+
+            unzip -q -o "$ZIP_FILE" -d extracted
+
+            echo ""
+            echo "======================================"
+            echo "EXTRACTED CONTENT"
+            echo "======================================"
+
+            find extracted -maxdepth 5 -type f | sort | head -500
+
+            # Find pubspec.yaml
+            PUBSPEC="$(find extracted -type f -name "pubspec.yaml" -print -quit || true)"
+
+            if [ -z "$PUBSPEC" ]; then
+              echo ""
+              echo "ERROR: pubspec.yaml was not found inside ZIP."
+              exit 1
+            fi
+
+            PROJECT_DIR="$(dirname "$PUBSPEC")"
+
+          fi
+
+          echo ""
+          echo "======================================"
+          echo "PROJECT DIRECTORY"
+          echo "======================================"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+
+      # ============================================================
+      # 3. SETUP FLUTTER
+      # ============================================================
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+
+      # ============================================================
+      # 4. FLUTTER VERSION
+      # ============================================================
+      - name: Flutter version
+        run: |
+          flutter --version
+
+
+      # ============================================================
+      # 5. CREATE / REPAIR ANDROID
+      # ============================================================
+      - name: Create or repair Android platform
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "======================================"
+          echo "CHECKING ANDROID PLATFORM"
+          echo "======================================"
+
+          if [ ! -f android/app/build.gradle ] && \
+             [ ! -f android/app/build.gradle.kts ]; then
+
+            echo ""
+            echo "Android platform missing."
+            echo "Generating Android platform..."
+
+            rm -rf android
+
+            flutter create \
+              --platforms=android \
+              --project-name=sadee_x_dima \
+              .
+
+          else
+
+            echo ""
+            echo "Android platform already exists."
+
+          fi
+
+          echo ""
+          echo "Checking required Android files..."
+
+          test -d android
+
+          test -f android/settings.gradle || \
+            test -f android/settings.gradle.kts
+
+          test -f android/app/build.gradle || \
+            test -f android/app/build.gradle.kts
+
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+
+          echo ""
+          echo "Android platform check PASSED."
+
+
+      # ============================================================
+      # 6. FIX GRADLE + AGP + KOTLIN
+      # ============================================================
       - name: Fix Android build versions
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Fixing Android Gradle / AGP / Kotlin versions..."
+          echo "======================================"
+          echo "FIXING ANDROID BUILD VERSIONS"
+          echo "======================================"
 
-          # Gradle
-          sed -i \
-            's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.5-bin.zip#' \
-            android/gradle/wrapper/gradle-wrapper.properties
+          # --------------------------------------------------------
+          # Gradle 8.14.5
+          # --------------------------------------------------------
 
-          # AGP
+          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+
+            sed -i \
+              's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.5-bin.zip#' \
+              android/gradle/wrapper/gradle-wrapper.properties
+
+          else
+
+            echo "ERROR: gradle-wrapper.properties not found."
+            exit 1
+
+          fi
+
+
+          # --------------------------------------------------------
+          # AGP 8.11.1
+          # --------------------------------------------------------
+
           if [ -f android/settings.gradle ]; then
+
             sed -i \
               's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.11.1"/' \
               android/settings.gradle
 
-            # Kotlin
-            sed -i \
-              's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "2.2.20"/' \
-              android/settings.gradle
           fi
 
-          # Kotlin DSL support
+
           if [ -f android/settings.gradle.kts ]; then
+
             sed -i \
               's/id("com.android.application") version "[^"]*"/id("com.android.application") version "8.11.1"/' \
               android/settings.gradle.kts
 
+          fi
+
+
+          # --------------------------------------------------------
+          # Kotlin 2.2.20
+          # --------------------------------------------------------
+
+          if [ -f android/settings.gradle ]; then
+
+            sed -i \
+              's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "2.2.20"/' \
+              android/settings.gradle
+
+          fi
+
+
+          if [ -f android/settings.gradle.kts ]; then
+
             sed -i \
               's/id("org.jetbrains.kotlin.android") version "[^"]*"/id("org.jetbrains.kotlin.android") version "2.2.20"/' \
               android/settings.gradle.kts
+
           fi
 
+
+          # --------------------------------------------------------
+          # Print versions
+          # --------------------------------------------------------
+
           echo ""
-          echo "===== Gradle ====="
+          echo "======================================"
+          echo "GRADLE"
+          echo "======================================"
+
           grep "distributionUrl" \
             android/gradle/wrapper/gradle-wrapper.properties || true
 
+
           echo ""
-          echo "===== Android Gradle Plugin ====="
+          echo "======================================"
+          echo "ANDROID GRADLE PLUGIN"
+          echo "======================================"
+
           grep "com.android.application" \
             android/settings.gradle 2>/dev/null || true
 
+          grep "com.android.application" \
+            android/settings.gradle.kts 2>/dev/null || true
+
+
           echo ""
-          echo "===== Kotlin ====="
+          echo "======================================"
+          echo "KOTLIN"
+          echo "======================================"
+
           grep "kotlin.android" \
             android/settings.gradle 2>/dev/null || true
 
+          grep "kotlin.android" \
+            android/settings.gradle.kts 2>/dev/null || true
+
+
           echo ""
           echo "Android versions fixed."
+
+
+      # ============================================================
+      # 7. VERIFY ANDROID PROJECT
+      # ============================================================
+      - name: Verify Android build files
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "======================================"
+          echo "VERIFYING ANDROID PROJECT"
+          echo "======================================"
+
+          test -d android
+
+          test -f android/app/build.gradle || \
+            test -f android/app/build.gradle.kts
+
+          test -f android/settings.gradle || \
+            test -f android/settings.gradle.kts
+
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+
+          echo ""
+          echo "Android files:"
+          find android -maxdepth 4 -type f | sort
+
+
+          echo ""
+          echo "======================================"
+          echo "GRADLE VERSION"
+          echo "======================================"
+
+          grep "distributionUrl" \
+            android/gradle/wrapper/gradle-wrapper.properties
+
+
+          echo ""
+          echo "======================================"
+          echo "AGP VERSION"
+          echo "======================================"
+
+          grep "com.android.application" \
+            android/settings.gradle 2>/dev/null || true
+
+          grep "com.android.application" \
+            android/settings.gradle.kts 2>/dev/null || true
+
+
+          echo ""
+          echo "======================================"
+          echo "KOTLIN VERSION"
+          echo "======================================"
+
+          grep "kotlin.android" \
+            android/settings.gradle 2>/dev/null || true
+
+          grep "kotlin.android" \
+            android/settings.gradle.kts 2>/dev/null || true
+
+
+          echo ""
+          echo "Android project verification PASSED."
+
+
+      # ============================================================
+      # 8. PUB GET
+      # ============================================================
+      - name: Flutter Pub Get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter pub get
+
+
+      # ============================================================
+      # 9. ANALYZE
+      # ============================================================
+      - name: Flutter Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter analyze --no-fatal-infos
+
+
+      # ============================================================
+      # 10. BUILD USER APK
+      # ============================================================
+      - name: Build User APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build apk \
+            --release \
+            -t lib/main_user.dart
+
+
+      # ============================================================
+      # 11. SAVE USER APK
+      # ============================================================
+      - name: Save User APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release
+
+          cp \
+            "${PROJECT_DIR}/build/app/outputs/flutter-apk/app-release.apk" \
+            "release/SADEE-DIMA-USER.apk"
+
+          test -f release/SADEE-DIMA-USER.apk
+
+          echo ""
+          echo "======================================"
+          echo "USER APK CREATED"
+          echo "======================================"
+
+          ls -lh release/SADEE-DIMA-USER.apk
+
+
+      # ============================================================
+      # 12. CLEAN BEFORE ADMIN BUILD
+      # ============================================================
+      - name: Flutter Clean
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter clean
+          flutter pub get
+
+
+      # ============================================================
+      # 13. BUILD ADMIN APK
+      # ============================================================
+      - name: Build Admin APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter build apk \
+            --release \
+            -t lib/main_admin.dart
+
+
+      # ============================================================
+      # 14. SAVE ADMIN APK
+      # ============================================================
+      - name: Save Admin APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cp \
+            "${PROJECT_DIR}/build/app/outputs/flutter-apk/app-release.apk" \
+            "release/SADEE-DIMA-ADMIN.apk"
+
+          test -f release/SADEE-DIMA-ADMIN.apk
+
+          echo ""
+          echo "======================================"
+          echo "ADMIN APK CREATED"
+          echo "======================================"
+
+          ls -lh release/SADEE-DIMA-ADMIN.apk
+
+
+      # ============================================================
+      # 15. VERIFY FINAL APKs
+      # ============================================================
+      - name: Verify final APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo ""
+          echo "======================================"
+          echo "FINAL APK FILES"
+          echo "======================================"
+
+          ls -lh release/
+
+          test -f release/SADEE-DIMA-USER.apk
+          test -f release/SADEE-DIMA-ADMIN.apk
+
+          echo ""
+          echo "======================================"
+          echo "BUILD SUCCESSFUL"
+          echo "======================================"
+
+          echo "USER APK:"
+          ls -lh release/SADEE-DIMA-USER.apk
+
+          echo ""
+          echo "ADMIN APK:"
+          ls -lh release/SADEE-DIMA-ADMIN.apk
+
+
+      # ============================================================
+      # 16. UPLOAD APK ARTIFACTS
+      # ============================================================
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: SADEE-DIMA-APKs
+          path: release/*.apk
+          if-no-files-found: error
